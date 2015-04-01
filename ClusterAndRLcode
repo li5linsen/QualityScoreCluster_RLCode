@@ -1,0 +1,287 @@
+/*
+align the qulity score
+input: read.fq--there should be a qulity score
+output: RL code qulity score ---- 8 records or 16 records
+// output:  align result or statistic result,such as starray[][]-----should include the file "statisticChar.c"
+score range: 33--126
+*/
+#include<stdlib.h>
+#include<stdio.h>
+
+#define DEBUG
+#define RECORDNUM  8
+#define CLUSTER_RATE  0.4
+
+//#define BITMASK(b) (1<<((b)%RECORDNUM))//字节内偏移
+//#define BITSLOT(b) ((b)/RECORDNUM)//将数据映射到所属字节内
+//#define BITSET(a,b) ((a)[BITSLOT(b)] |= BITMASK(b))//置位
+//#define BITCLEAR(a,b) ((a)[BITSLOT(b)] &= ~BITMASK(b))//清位
+//#define BITTEST(a,b) ((a)[BITSLOT(b)] & BITMASK(b))//查看相应位数据
+//#define BITNSLOTS(nb) ((nb + RECORDNUM - 1) / RECORDNUM)//计算所需字节数
+#define BITSET(a,b) ( a|=(1<<b) )  //set 1
+#define BITCLK(a,b) ( (a)&=~(1<<(b)) )  //set 0
+#define BITTEST(a,b) ( (a)&(1<<(b)) )  //test 1 or 0
+//public variate---------------------
+int ReadLength, threshold_value, sameCount[RECORDNUM][RECORDNUM]={0}, a[RECORDNUM]={0}, b[RECORDNUM]={0}, **tranWord;
+unsigned int *c, c_size;
+//func-------------------------------
+int CodeQuality(char *buf, char *str, int n) //return the length of buf
+{
+	//buf store RLcode, str is input seq, n is RL size
+	char prech, ch;
+	int  i, count=1, len=0;  //len means the length of buf
+	n--;
+	if( (prech=*str)<33 )
+		return len;
+	for(i=1; (ch=*(str+i))>32; i++)
+	{
+		if(prech==ch)
+			count++;		
+		else
+		{
+			if(count>n) //not >=	256
+			{	
+				if( count<256 )
+					len+=sprintf(buf+len,"%c%c",-prech,count);
+				else //up to 256
+				{
+					do
+					{
+						len+=sprintf(buf+len,"%c%c",-prech,255);
+						count-=255;
+					}while(count>255);
+					if(count>n)
+						len+=sprintf(buf+len,"%c%c",-prech,count);
+					else
+						while( count-- >0 )
+							*(buf+len++)=prech;
+				}
+			}
+			else			
+				while( count-- >0 )
+					*(buf+len++)=prech;
+					//sprintf(buf+len,"%c",prech+OFFSET);
+			
+			count=1;
+			prech=ch;
+		}
+	}
+	if(count>n) //not >=			
+		len+=sprintf(buf+len,"%c%c",-prech,count);			
+	else			
+		while( count-- >0 )
+			*(buf+len++)=prech;
+	
+	//*(buf+len++)=10; //endline
+	return len;
+}
+int DecodeQuality(char *buf, char *str, int n) //return the length of buf
+{
+	//non
+	return 0;
+}
+int cmp1(char *s1, char *s2) //method 1
+{
+	int i, count=0;
+	//for(i=0; *(s1+i)>32; i++)
+	for(i=0; i<ReadLength; i++)
+		if( *(s1+i)==*(s2+i) )
+			count++;
+	//ReadLength=i; //every time need this step???
+	return count;
+}
+int cmp2(char *s1, char *s2) //method 2: useless func
+{
+	int i; //method2:pre process,find the N_code char, then put them a evaluate score
+	for(i=0; i<ReadLength; i++)
+		c[i/32]=( *(s1+i)==*(s2+i) );  //bit
+	return c[0]; 
+}
+int Qcluster(char *s[], int n,char *outbuf) //to find the similar score sequence----supose the length of seq is equal
+{
+	//s[] store the score seq,seq number is n
+	int i,j, max=0, count=0,word=0, temp,Mtemp=0, *W;
+
+	//find similar and get the cluRecord
+	for(i=0; i<RECORDNUM; i++) 
+		for(j=i+1; j<RECORDNUM; j++)
+		{
+			if( (temp=cmp1(s[i],s[j])) >threshold_value ) //method 1:just compare;  sameCount[i][j]
+			{
+				a[count]=i;
+				b[count]=j; //public variate ???				
+				if(temp>Mtemp)  //useless variate ????
+				{
+					max=count;  //the most similar
+					Mtemp=temp;
+				}
+				count++;
+			}
+		}	
+	//j=0;
+	//if(count>0)
+	//{
+	//	BITSET(word,a[0]);
+	//	BITSET(word,b[0]);
+	//}
+	//for(i=1; i<count; i++) //method1 to find choose similar pair
+	//{
+	//	
+	//	if(b[j]==a[i])
+	//	{
+	//		printf("%d\n",b[i]);
+	//		j=i;
+	//	}
+	//} 
+
+	if(count>0) //there is an cluster //method 2
+	{
+		BITSET(word,a[max]);
+		for(i=max-1; i>=0; i--) //forward
+		{
+			if(a[max]==b[i])
+			{
+				BITSET(word,a[i]);
+				max=i;				
+			}
+		}
+		BITSET(word,b[max]);
+		for(j=max+1; j<count; j++) //backward
+		{
+			if(b[max]==a[j])
+			{
+				BITSET(word,b[i]);
+				max=i;
+			}
+		}
+	}
+	//Link all cluster seq
+	W=tranWord[word];
+	count=W[0];  //count-1 is the number of 1 in word
+	W++;   //true data
+	for(i=0; i<count; i++) //cluster
+	{
+		for(j=0; j<ReadLength; j++)
+			outbuf[j*count+i]=s[W[i]][j];
+	}
+	//uncluster
+	while(count<RECORDNUM)
+	{
+		strncpy(outbuf+count*ReadLength,s[W[count]],ReadLength);
+		count++;		
+	}
+	return word;
+}
+//char*LinkSeq(char *outbuf, char )
+//{
+//	return NULL;
+//}
+//main------------------------------
+int main(int argc, char*argv[])
+{
+	int i,j, p, cluRecord=0, cluPara=1, readCount=0, codeCount=0, codeLen=0, temp[RECORDNUM]={0},t;
+	
+	FILE *readFile, *outFile;
+	char *str[32]={NULL}, strtemp[4096]={0}, *outputbuf, *codebuf;
+
+#ifdef DEBUG
+	readFile=fopen("SRR1063349.fastq","rb");
+	outFile =fopen("out.txt","wb");
+#else
+	if(argc<2)
+	{ printf("errer parameter !\n"); return -1; }
+
+	readFile=fopen(argv[1],"rb");
+	outFile =fopen(argv[2],"wb");
+#endif
+
+	if(!readFile || !outFile)
+	{
+		printf("error opening file !\n");
+		return -1;
+	}
+	//init
+	cluPara=1;
+	for(i=0; i<RECORDNUM; i++)
+	{
+		str[i]=(char*)malloc(4096*sizeof(char));
+		cluPara*=2;
+	}
+	outputbuf=(char*)malloc(4096*RECORDNUM*sizeof(char)); //enough size
+	codebuf  =(char*)malloc(4096*RECORDNUM*sizeof(char)); //enough size
+	tranWord=(int**)malloc(cluPara*sizeof(int *));
+	for(i=0; i<cluPara; i++)
+	{
+		*(tranWord+i)=(int*)calloc(RECORDNUM+1,sizeof(int));
+		p=1; t=0;
+		for(j=0; j<RECORDNUM; j++)
+		{
+			if( BITTEST(i,j) )
+			{
+				tranWord[i][p]=j;
+				p++;
+			}
+			else 
+				temp[t++]=j;
+		}
+		tranWord[i][0]=p-1;    //the number of 1 in i
+		for(j=0; j<t; j++)
+			tranWord[i][j+p]=temp[j];
+	}
+
+	fgets(strtemp,4096,readFile);
+	fgets(strtemp,4096,readFile);
+	for(i=0; strtemp[i]>64; i++)
+		;
+	ReadLength=i; //just for fixed length
+	threshold_value=ReadLength*CLUSTER_RATE;
+	c_size=i/32+1;
+	c=(unsigned int*)calloc(c_size,sizeof(unsigned int)); //bigger than the length cmp result
+	fgets(strtemp,4096,readFile);
+	j=0;
+	while( fgets(str[j++],4096,readFile)!=NULL ) //qulity from fastq format
+	{
+		readCount++;
+		if(j%RECORDNUM==0)
+		{
+			cluRecord=Qcluster(str,RECORDNUM,outputbuf); //-1 is a useless length
+			//-----test--------
+			printf("word: %d---%d\n%s\n",cluRecord,strlen(outputbuf),outputbuf);
+			//LinkSeq(str,cluRecord);
+			fprintf(outFile,"%c",cluRecord);  //write flag--char-8bit or short int--16bit
+			codeLen=CodeQuality(codebuf,outputbuf,3); //input the two char *
+			fwrite(codebuf,sizeof(char),codeLen,outFile);
+			codeCount+=codeLen; //size of the codefile
+			j=0;
+		}
+		fgets(strtemp,4096,readFile);
+		fgets(strtemp,4096,readFile);
+		fgets(strtemp,4096,readFile);
+	}
+	if(j>0)  //last lines <RECORDNUM
+	{
+		fprintf(outFile,"%c",0); //write flag 8bit or===16bit
+		p=0;
+		while( (*(outputbuf+p)=*(str[0]+p))>32 )
+				p++; //in the end, p is the length of Q seq
+		// *(outputbuf+p)=0;
+		for(i=1; i<j; i++) //the last score seq
+		{
+			strncpy(outputbuf+p*i,str[i],p);			
+		}
+		*(outputbuf+j*p)=0;
+		codeLen=CodeQuality(codebuf,outputbuf,3);
+		fwrite(codebuf,sizeof(char),codeLen,outFile); //write code
+		codeCount+=codeLen;
+	}
+
+	free(outputbuf); free(strtemp); free(c); //free the memory
+	for(i=0; i<RECORDNUM; i++)
+		free(str[i]);
+
+	//output information
+	
+	
+	printf("code file size: %d\nreadCount: %d\n",codeCount,readCount);
+	return 0;
+}
